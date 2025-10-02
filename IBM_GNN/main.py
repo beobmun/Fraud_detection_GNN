@@ -1,4 +1,4 @@
-from load_data import IBM_Dataset
+from IBM_dataset import IBM_Dataset
 
 TRANSACTIONS_CSV_PATH = '../data/IBM_Credit_Card_Transaction/credit_card_transactions-ibm_v2.csv'
 USERS_CSV_PATH = '../data/IBM_Credit_Card_Transaction/sd254_users.csv'
