@@ -8,6 +8,7 @@ from torch_geometric.data import Data, HeteroData
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 class IBM_Dataset:
     def __init__(self):
@@ -57,94 +58,100 @@ class IBM_Dataset:
     def preprocess_transactions(self):
         if self.transactions_df is None:
             raise ValueError("Transactions dataframe is not loaded. Please call read_transactions_csv() first.")
+        
+        with tqdm(total=9 ,desc="Preprocessing transactions...", ncols=100, leave=False) as pbar:
+            self.edge_transactions = self.transactions_df.copy()
+            # Create a 'DateTime' column
+            self.edge_transactions['DateTime'] = pd.to_datetime(
+                self.edge_transactions['Year'].astype(str) + '-' +
+                self.edge_transactions['Month'].astype(str).str.zfill(2) + '-' +
+                self.edge_transactions['Day'].astype(str).str.zfill(2) + ' ' +
+                self.edge_transactions['Time']
+            )
+            pbar.update(1)
+            
+            # Create a separate 'Date' column
+            self.edge_transactions['Date'] = pd.to_datetime(
+                self.edge_transactions['Year'].astype(str) + '-' +
+                self.edge_transactions['Month'].astype(str).str.zfill(2) + '-' +
+                self.edge_transactions['Day'].astype(str).str.zfill(2)
+            )
+            self.edge_transactions = self.edge_transactions.sort_values(by='DateTime', ascending=True)
+            self.edge_transactions = self.edge_transactions.reset_index(drop=True)
+            
+            self.edge_transactions['isFraud'] = self.edge_transactions['Is Fraud?'].map({'No': 0, 'Yes': 1})
+            pbar.update(1)
+            
+            # Select relevant columns
+            self.edge_transactions = self.edge_transactions[['DateTime', 'Date', 'User', 'Card', 'Merchant Name', 'Amount', 'Use Chip', 'Zip', 'MCC', 'Errors?', 'isFraud']]
 
-        print("Preprocessing transactions data...")
+            self.edge_transactions = self.edge_transactions.rename(columns={'Errors?': 'Error'})
+            self.edge_transactions['User_Card'] = self.edge_transactions['User'].astype(str) + '_' + self.edge_transactions['Card'].astype(str)
 
-        self.edge_transactions = self.transactions_df.copy()
+            self.edge_transactions.loc[:, 'Amount'] = self.edge_transactions['Amount'].replace({"\$": "", ",": ""}, regex=True).astype(float)
+            self.edge_transactions['Src'] = np.where(self.edge_transactions['Amount'] >= 0, self.edge_transactions['User_Card'], self.edge_transactions['Merchant Name']).astype(str)
+            self.edge_transactions['Dest'] = np.where(self.edge_transactions['Amount'] >= 0, self.edge_transactions['Merchant Name'], self.edge_transactions['User_Card']).astype(str)
+            self.edge_transactions['Relation'] = np.where(self.edge_transactions['Amount'] >= 0, 'transaction', 'refund')
+            pbar.update(1)
+            
+            # Amount scaling
+            scaler = MinMaxScaler()
+            abs_amounts = self.edge_transactions[['Amount']].abs().astype(float)
+            log_scaled_amounts = np.log1p(abs_amounts)
+            self.edge_transactions['Scaled_Amount'] = scaler.fit_transform(log_scaled_amounts)
+            pbar.update(1)
 
-        # Create a 'DateTime' column
-        self.edge_transactions['DateTime'] = pd.to_datetime(
-            self.edge_transactions['Year'].astype(str) + '-' +
-            self.edge_transactions['Month'].astype(str).str.zfill(2) + '-' +
-            self.edge_transactions['Day'].astype(str).str.zfill(2) + ' ' +
-            self.edge_transactions['Time']
-        )
+            # MCC indexing
+            all_mcc = self.edge_transactions['MCC'].unique()
+            self.mcc_to_idx = {mcc: idx for idx, mcc in enumerate(all_mcc)}
+            self.idx_to_mcc = {idx: mcc for mcc, idx in self.mcc_to_idx.items()}
+            self.edge_transactions['MCC_idx'] = self.edge_transactions['MCC'].map(self.mcc_to_idx)
+            pbar.update(1)
 
-        # Create a separate 'Date' column
-        self.edge_transactions['Date'] = pd.to_datetime(
-            self.edge_transactions['Year'].astype(str) + '-' +
-            self.edge_transactions['Month'].astype(str).str.zfill(2) + '-' +
-            self.edge_transactions['Day'].astype(str).str.zfill(2)
-        )
+            # Zip code indexing
+            self.edge_transactions['Zip'] = self.edge_transactions['Zip'].fillna(0).astype(float)
+            all_zips = self.edge_transactions['Zip'].unique()
+            self._set_zip_mappings(all_zips)
+            self.edge_transactions['Zip_idx'] = self.edge_transactions['Zip'].map(self.zip_to_idx)
+            pbar.update(1)
 
-        self.edge_transactions = self.edge_transactions.sort_values(by='DateTime', ascending=True)
-        self.edge_transactions = self.edge_transactions.reset_index(drop=True)
+            # Use Chip, Error to one-hot encoding
+            onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+            use_chip_onehot = onehot_encoder.fit_transform(self.edge_transactions[['Use Chip']])
+            use_chip_types = onehot_encoder.get_feature_names_out(['Use Chip'])
+            use_chip_df = pd.DataFrame(use_chip_onehot, columns=use_chip_types, index=self.edge_transactions.index)
 
-        self.edge_transactions['isFraud'] = self.edge_transactions['Is Fraud?'].map({'No': 0, 'Yes': 1})
+            self.edge_transactions['Error'] = self.edge_transactions['Error'].fillna('NaN')
+            errors = self.edge_transactions['Error'].unique()
+            error_types = set()
+            for errs in errors:
+                if errs == 'NaN':
+                    continue
+                for err in errs.split(','):
+                    error_types.add("Error_" + err.strip())
+            error_df = pd.DataFrame(0, columns=list(error_types), index=self.edge_transactions.index, dtype=float)
+            for i, errs in enumerate(self.edge_transactions['Error']):
+                if errs == 'NaN':
+                    continue
+                for err in errs.split(','):
+                    error_df.at[i, "Error_" + err.strip()] = 1
 
-        # Select relevant columns
-        self.edge_transactions = self.edge_transactions[['DateTime', 'Date', 'User', 'Card', 'Merchant Name', 'Amount', 'Use Chip', 'Zip', 'MCC', 'Errors?', 'isFraud']]
+            self.edge_transactions = pd.concat([self.edge_transactions, use_chip_df, error_df], axis=1)
+            pbar.update(1)
 
-        self.edge_transactions = self.edge_transactions.rename(columns={'Errors?': 'Error'})
-        self.edge_transactions['User_Card'] = self.edge_transactions['User'].astype(str) + '_' + self.edge_transactions['Card'].astype(str)
+            # Node Merchants
+            merchant_names = self.edge_transactions['Merchant Name'].unique()
+            merchant_zips = self.edge_transactions.groupby('Merchant Name')['Zip_idx'].first().to_dict()
+            self.node_merchants = pd.DataFrame({
+                'Merchant Name': merchant_names,
+                'Zip_idx': [merchant_zips[name] for name in merchant_names]
+            })
+            self.node_merchants['Merchant Name'] = self.node_merchants['Merchant Name'].astype(str)
+            pbar.update(1)
 
-        self.edge_transactions.loc[:, 'Amount'] = self.edge_transactions['Amount'].replace({"\$": "", ",": ""}, regex=True).astype(float)
-        self.edge_transactions['Src'] = np.where(self.edge_transactions['Amount'] >= 0, self.edge_transactions['User_Card'], self.edge_transactions['Merchant Name']).astype(str)
-        self.edge_transactions['Dest'] = np.where(self.edge_transactions['Amount'] >= 0, self.edge_transactions['Merchant Name'], self.edge_transactions['User_Card']).astype(str)
-        self.edge_transactions['Relation'] = np.where(self.edge_transactions['Amount'] >= 0, 'transaction', 'refund')
-
-        # Amount scaling
-        scaler = MinMaxScaler()
-        abs_amounts = self.edge_transactions[['Amount']].abs().astype(float)
-        log_scaled_amounts = np.log1p(abs_amounts)
-        self.edge_transactions['Scaled_Amount'] = scaler.fit_transform(log_scaled_amounts)
-
-        # MCC indexing
-        all_mcc = self.edge_transactions['MCC'].unique()
-        self.mcc_to_idx = {mcc: idx for idx, mcc in enumerate(all_mcc)}
-        self.idx_to_mcc = {idx: mcc for mcc, idx in self.mcc_to_idx.items()}
-        self.edge_transactions['MCC_idx'] = self.edge_transactions['MCC'].map(self.mcc_to_idx)
-
-        # Zip code indexing
-        self.edge_transactions['Zip'] = self.edge_transactions['Zip'].fillna(0).astype(float)
-        all_zips = self.edge_transactions['Zip'].unique()
-        self._set_zip_mappings(all_zips)
-        self.edge_transactions['Zip_idx'] = self.edge_transactions['Zip'].map(self.zip_to_idx)
-
-        # Use Chip, Error to one-hot encoding
-        onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
-        use_chip_onehot = onehot_encoder.fit_transform(self.edge_transactions[['Use Chip']])
-        use_chip_types = onehot_encoder.get_feature_names_out(['Use Chip'])
-        use_chip_df = pd.DataFrame(use_chip_onehot, columns=use_chip_types, index=self.edge_transactions.index)
-
-        self.edge_transactions['Error'] = self.edge_transactions['Error'].fillna('NaN')
-        errors = self.edge_transactions['Error'].unique()
-        error_types = set()
-        for errs in errors:
-            if errs == 'NaN':
-                continue
-            for err in errs.split(','):
-                error_types.add("Error_" + err.strip())
-        error_df = pd.DataFrame(0, columns=list(error_types), index=self.edge_transactions.index, dtype=float)
-        for i, errs in enumerate(self.edge_transactions['Error']):
-            if errs == 'NaN':
-                continue
-            for err in errs.split(','):
-                error_df.at[i, "Error_" + err.strip()] = 1
-
-        self.edge_transactions = pd.concat([self.edge_transactions, use_chip_df, error_df], axis=1)
-
-        # Node Merchants
-        merchant_names = self.edge_transactions['Merchant Name'].unique()
-        merchant_zips = self.edge_transactions.groupby('Merchant Name')['Zip_idx'].first().to_dict()
-        self.node_merchants = pd.DataFrame({
-            'Merchant Name': merchant_names,
-            'Zip_idx': [merchant_zips[name] for name in merchant_names]
-        })
-        self.node_merchants['Merchant Name'] = self.node_merchants['Merchant Name'].astype(str)
-
-        # Drop intermediate columns
-        self.edge_transactions = self.edge_transactions.drop(columns=['DateTime', 'User', 'Card', 'Merchant Name', 'Amount', 'Use Chip', 'Zip', 'MCC', 'Error', 'User_Card'])
+            # Drop intermediate columns
+            self.edge_transactions = self.edge_transactions.drop(columns=['DateTime', 'User', 'Card', 'Merchant Name', 'Amount', 'Use Chip', 'Zip', 'MCC', 'Error', 'User_Card'])
+            pbar.update(1)
 
         print("Preprocessing transactions completed.")
 
@@ -286,6 +293,7 @@ class IBM_Dataset:
 
         return self
 
+    '''
     def build_pyg_graph(self, start_date=None, end_date=None):
         if self.edge_transactions is None:
             raise ValueError("Edge transactions dataframe is not loaded. Please call read_transactions_csv() and preprocess_transactions() first.")
@@ -315,6 +323,7 @@ class IBM_Dataset:
         data.edge_labels = torch.tensor(filtered_edges['isFraud'].values, dtype=torch.long)
 
         return data
+    '''
 
     def build_hetero_graph(self, start_date=None, end_date=None):
         if self.node_cards is None:
@@ -378,7 +387,7 @@ class IBM_Dataset:
                     card_b_idx = self.card_to_idx[card_b]
                     edge_same_merchants.append((card_a_idx, card_b_idx))
                     edge_same_merchants.append((card_b_idx, card_a_idx))
-        edge_same_merchants = torch.tensor(edge_same_merchants, dtype=torch.long).T
+        edge_same_merchants = torch.tensor(edge_same_merchants, dtype=torch.long).t()
         data['card', 'same_merchant', 'card'].edge_index = edge_same_merchants
 
         # data['card', 'belong_to', 'user'], data['user', 'own', 'card']
@@ -390,8 +399,8 @@ class IBM_Dataset:
                 card_idx = self.card_to_idx[card]
                 edge_belong_to.append((card_idx, user_idx))
                 edge_owns.append((user_idx, card_idx))
-        edge_belong_to = torch.tensor(edge_belong_to, dtype=torch.long).T
-        edge_owns = torch.tensor(edge_owns, dtype=torch.long).T
+        edge_belong_to = torch.tensor(edge_belong_to, dtype=torch.long).t()
+        edge_owns = torch.tensor(edge_owns, dtype=torch.long).t()
         data['card', 'belong_to', 'user'].edge_index = edge_belong_to
         data['user', 'own', 'card'].edge_index = edge_owns
 
@@ -559,6 +568,7 @@ class IBM_Dataset:
         plt.tight_layout()
         plt.show()
 
+    '''
     def show_graph(self, data):
         if self.node_attr is None:
             raise ValueError("Node attributes are not created. Please call create_graph_x() first.")
@@ -629,6 +639,7 @@ class IBM_Dataset:
         plt.axis('off')
         plt.tight_layout()
         plt.show()
+    '''
 
     def get_edge_transactions(self, start_date=None, end_date=None):
         if self.edge_transactions is None:
