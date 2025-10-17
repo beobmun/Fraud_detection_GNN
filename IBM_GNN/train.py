@@ -73,35 +73,58 @@ class Train():
         predictions_dict = self.model(history_snapshots_batch, target_batch)
 
         loss = 0
+        all_preds_flat_batch = list()
+        all_labels_flat_batch = list()
+
         for edge_type, preds in predictions_dict.items():
             if edge_type in target_batch.edge_labels_dict and hasattr(target_batch[edge_type], 'edge_labels'):
                 labels = target_batch[edge_type].edge_labels.float()
                 if labels.numel() > 0:
                     loss += criterion(preds.squeeze(-1), labels)
-        
+                    all_preds_flat_batch.append(preds.squeeze(-1).detach().cpu())
+                    all_labels_flat_batch.append(labels.cpu())
+
+        all_preds_flat_batch = torch.cat(all_preds_flat_batch)
+        all_labels_flat_batch = torch.cat(all_labels_flat_batch)
+
         if isinstance(loss, torch.Tensor):
             loss.backward()
             optimizer.step()
-            return loss.item()
+            return loss.item(), all_preds_flat_batch, all_labels_flat_batch
         else:
-            return 0.0
+            return 0.0, all_preds_flat_batch, all_labels_flat_batch
         
     def train_batch(self, dataloader, optimizer, criterion, epoch, batch_size):
         total_loss = 0
         num_batches = 0
+        all_preds_flat = list()
+        all_labels_flat = list()
+
         with tqdm(total=len(dataloader)*batch_size, desc=f"Epoch {epoch+1} Training", ncols=100, leave=False) as pbar:
             for history_snapshots_batch, target_batch in dataloader:
                 history_snapshots_batch = [[snap.to(self.device) for snap in batched_seq.to_data_list()] for batched_seq in history_snapshots_batch]
                 target_batch = target_batch.to(self.device)
 
-                loss = self.train_minibatch(history_snapshots_batch, target_batch, optimizer, criterion)
+                loss, batch_pred, batch_labels = self.train_minibatch(history_snapshots_batch, target_batch, optimizer, criterion)
                 total_loss += loss
+                all_preds_flat.append(batch_pred)
+                all_labels_flat.append(batch_labels)
                 num_batches += 1
                 pbar.update(len(history_snapshots_batch))
             
             if num_batches > 0:
                 avg_loss = total_loss / num_batches
-            return avg_loss
+
+            all_preds_flat = torch.cat(all_preds_flat).numpy()
+            all_labels_flat = torch.cat(all_labels_flat).numpy()
+            if len(np.unique(all_labels_flat)) > 1:
+                roc_auc = roc_auc_score(all_labels_flat, all_preds_flat)
+                pr_auc = average_precision_score(all_labels_flat, all_preds_flat)
+            else:
+                roc_auc = -1
+                pr_auc = -1
+
+            return avg_loss, roc_auc, pr_auc
 
     def evaluate(self, dataloader, criterion, epoch, batch_size):
         self.model.eval()
@@ -131,7 +154,7 @@ class Train():
                     pbar.update(len(history_snapshots_batch))
 
                 if not all_preds_flat:
-                    return 0.0, 0.0, 0.0
+                    return -1, -1, -1
                 
             all_preds_flat = torch.cat(all_preds_flat).numpy()
             all_labels_flat = torch.cat(all_labels_flat).numpy()
@@ -141,8 +164,8 @@ class Train():
                 roc_auc = roc_auc_score(all_labels_flat, all_preds_flat)
                 pr_auc = average_precision_score(all_labels_flat, all_preds_flat)
             else:
-                roc_auc = 0.0
-                pr_auc = 0.0
+                roc_auc = -1
+                pr_auc = -1
             return avg_val_loss, roc_auc, pr_auc
 
     def run_training_(self, epochs, batch_size, learning_rate, train_dataloader=None, val_dataloader=None):
@@ -164,9 +187,20 @@ class Train():
 
         optimizer = Adam(self.model.parameters(), lr=learning_rate)
         criterion = FocalLoss()
+        metrics = {'train_loss': [], 'train_roc_auc': [], 'train_pr_auc': [],
+                   'val_loss': [], 'val_roc_auc': [], 'val_pr_auc': []}
 
         for epoch in range(epochs):
-            train_loss = self.train_batch(self.train_dataloader, optimizer, criterion, epoch, batch_size)
-            val_loss, roc_auc, pr_auc = self.evaluate(self.val_dataloader, criterion, epoch, batch_size)
+            train_loss, train_roc_auc, train_pr_auc = self.train_batch(self.train_dataloader, optimizer, criterion, epoch, batch_size)
+            val_loss, val_roc_auc, val_pr_auc = self.evaluate(self.val_dataloader, criterion, epoch, batch_size)
 
-            print(f"Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, ROC AUC: {roc_auc:.4f}, PR AUC: {pr_auc:.4f}")
+            metrics['train_loss'].append(train_loss)
+            metrics['train_roc_auc'].append(train_roc_auc)
+            metrics['train_pr_auc'].append(train_pr_auc)
+            metrics['val_loss'].append(val_loss)
+            metrics['val_roc_auc'].append(val_roc_auc)
+            metrics['val_pr_auc'].append(val_pr_auc)
+
+            print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f}, Train ROC AUC: {train_roc_auc:.4f}, Train PR AUC: {train_pr_auc:.4f} | Val Loss: {val_loss:.4f}, Val ROC AUC: {val_roc_auc:.4f}, Val PR AUC: {val_pr_auc:.4f}")
+
+        return metrics
