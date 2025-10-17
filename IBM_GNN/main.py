@@ -3,6 +3,7 @@ from IBM_dataset import IBM_Dataset
 from dataloader import Dataset, collate_fn
 from model import FraudDetectionModel
 from train import Train
+from setproctitle import setproctitle
 
 TRANSACTIONS_CSV_PATH = '../data/IBM_Credit_Card_Transaction/credit_card_transactions-ibm_v2.csv'
 USERS_CSV_PATH = '../data/IBM_Credit_Card_Transaction/sd254_users.csv'
@@ -49,6 +50,8 @@ def main():
     try:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {device}")
+        setproctitle("beobmun_GNN_training")
+
         dataset = (IBM_Dataset()
                 .read_transactions_csv(TRANSACTIONS_CSV_PATH)
                 .read_users_csv(USERS_CSV_PATH)
@@ -63,16 +66,17 @@ def main():
             NODE_FEATURES_DIM, EDGE_FEATURES_DIM, ZIP_EMB_DIM, MCC_EMB_DIM, GNN_HIDDEN_DIM, GRU_HIDDEN_DIM, METADATA, 
             len(dataset.zip_to_idx), len(dataset.mcc_to_idx), 
             ATTENTION_HEADS)
-        
-        epochs = 10
+        model.to(device)
+
+        epochs = 100
         learning_rate = 0.001
-        batch_size=4
+        batch_size=2
         window_size=1
         memory_size=10
 
         start_date = '1996-01-01'
-        # end_date = '2019-12-31'
-        end_date = '1996-12-31'
+        end_date = '2019-12-31'
+        # end_date = '1996-02-28'
 
         train = (Train()
                  .set_dataset(dataset)

@@ -217,7 +217,8 @@ class FraudDetectionModel(nn.Module):
 
     def forward(self, history_snapshot_batch, target_batch):
         batch_final_node_embs_dict_list = list()
-        device = next(self.parameters()).device
+        # device = next(self.parameters()).device
+        device = target_batch.x_dict[self.node_types[0]].device
         for history_snapshots in history_snapshot_batch:
             final_embs_dict = self.temporal_encoder(history_snapshots)
             batch_final_node_embs_dict_list.append(final_embs_dict)

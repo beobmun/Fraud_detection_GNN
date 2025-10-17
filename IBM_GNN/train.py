@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -66,6 +67,12 @@ class Train():
 
         return self
 
+    def save_results(self, metrics, save_path, epoch=None):
+        os.makedirs(save_path, exist_ok=True)
+        metrics_df = pd.DataFrame(metrics)
+        metrics_df.to_csv(os.path.join(save_path, 'metrics.csv'), index=False)
+        torch.save(self.model.state_dict(), os.path.join(save_path, f'epoch_{epoch}_model.pth'))
+
     def train_minibatch(self, history_snapshots_batch, target_batch, optimizer, criterion):
         self.model.train()
         optimizer.zero_grad()
@@ -117,6 +124,7 @@ class Train():
 
             all_preds_flat = torch.cat(all_preds_flat).numpy()
             all_labels_flat = torch.cat(all_labels_flat).numpy()
+
             if len(np.unique(all_labels_flat)) > 1:
                 roc_auc = roc_auc_score(all_labels_flat, all_preds_flat)
                 pr_auc = average_precision_score(all_labels_flat, all_preds_flat)
@@ -202,5 +210,10 @@ class Train():
             metrics['val_pr_auc'].append(val_pr_auc)
 
             print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f}, Train ROC AUC: {train_roc_auc:.4f}, Train PR AUC: {train_pr_auc:.4f} | Val Loss: {val_loss:.4f}, Val ROC AUC: {val_roc_auc:.4f}, Val PR AUC: {val_pr_auc:.4f}")
+            
+            if (epoch+1) % 10 == 0:
+                self.save_results(metrics, 'training_results', epoch=str(epoch+1))
+            
+        self.save_results(metrics, 'training_results', epoch='final')
 
-        return metrics
+        print("Training completed.")
