@@ -134,7 +134,7 @@ class TemporalEncoder(nn.Module):
 
         for edge_type in self.edge_types:
             in_dim = edge_features_dim.get(edge_type, 0)
-            if edge_type in [('card', 'transaction', 'merchant'), ('merchant', 'refund', 'card')]:
+            if edge_type in [('card', 'transaction', 'merchant'), ('merchant', 'transaction_by', 'card'), ('merchant', 'refund', 'card'), ('card', 'refund_by', 'merchant')]:
                 in_dim += mcc_emb_dim + zip_emb_dim
 
             edge_type_str = "_".join(edge_type)
@@ -167,7 +167,7 @@ class TemporalEncoder(nn.Module):
             e_dict = dict()
             for edge_type in self.edge_types:
                 edge_type_str = "_".join(edge_type)
-                if edge_type in [('card', 'transaction', 'merchant'), ('merchant', 'refund', 'card')]:
+                if edge_type in [('card', 'transaction', 'merchant'), ('merchant', 'transaction_by', 'card'), ('merchant', 'refund', 'card'), ('card', 'refund_by', 'merchant')]:
                     edge_mcc_embs = self.edge_mcc_embedding(snapshot[edge_type].edge_mcc_idx)
                     edge_zip_embs = self.edge_zip_embedding(snapshot[edge_type].edge_zip_idx)
                     combined_edge_features = torch.cat([snapshot[edge_type].edge_attr, edge_mcc_embs, edge_zip_embs], dim=-1)
