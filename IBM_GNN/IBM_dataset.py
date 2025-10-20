@@ -361,6 +361,11 @@ class IBM_Dataset:
         data['card', 'transaction', 'merchant'].edge_labels = torch.tensor(transactions['isFraud'].values, dtype=torch.long)
         data['card', 'transaction', 'merchant'].edge_mcc_idx = torch.tensor(transactions['MCC_idx'].values, dtype=torch.long)
         data['card', 'transaction', 'merchant'].edge_zip_idx = torch.tensor(transactions['Zip_idx'].values, dtype=torch.long)
+        # data['merchant', 'transaction_by', 'card']
+        data['merchant', 'transaction_by', 'card'].edge_index = torch.tensor(np.vstack((dest_idx, src_idx)), dtype=torch.long)
+        data['merchant', 'transaction_by', 'card'].edge_attr = torch.tensor(transactions[transactions_attr_cols].values, dtype=torch.float)
+        data['merchant', 'transaction_by', 'card'].edge_mcc_idx = torch.tensor(transactions['MCC_idx'].values, dtype=torch.long)
+        data['merchant', 'transaction_by', 'card'].edge_zip_idx = torch.tensor(transactions['Zip_idx'].values, dtype=torch.long)
 
         # data['merchant', 'refund', 'card']
         refunds = filtered_edge_transactions[filtered_edge_transactions['Relation'] == 'refund']
@@ -371,24 +376,29 @@ class IBM_Dataset:
         data['merchant', 'refund', 'card'].edge_labels = torch.tensor(refunds['isFraud'].values, dtype=torch.long)
         data['merchant', 'refund', 'card'].edge_mcc_idx = torch.tensor(refunds['MCC_idx'].values, dtype=torch.long)
         data['merchant', 'refund', 'card'].edge_zip_idx = torch.tensor(refunds['Zip_idx'].values, dtype=torch.long)
-
+        # data['card', 'refund_by', 'merchant']
+        data['card', 'refund_by', 'merchant'].edge_index = torch.tensor(np.vstack((dest_idx, src_idx)), dtype=torch.long)
+        data['card', 'refund_by', 'merchant'].edge_attr = torch.tensor(refunds[transactions_attr_cols].values, dtype=torch.float)
+        data['card', 'refund_by', 'merchant'].edge_mcc_idx = torch.tensor(refunds['MCC_idx'].values, dtype=torch.long)
+        data['card', 'refund_by', 'merchant'].edge_zip_idx = torch.tensor(refunds['Zip_idx'].values, dtype=torch.long)
+        
         # data['card', 'same_merchant', 'card']
-        merchant_grouped_transactions = transactions.groupby('Dest')['Src'].apply(set)
-        edge_same_merchants = []
-        for merchant, cards_group in merchant_grouped_transactions.items():
-            if len(cards_group) < 2:
-                continue
-            cards_list = list(cards_group)
-            for i in range(len(cards_list)):
-                for j in range(i + 1, len(cards_list)):
-                    card_a = cards_list[i]
-                    card_b = cards_list[j]
-                    card_a_idx = self.card_to_idx[card_a]
-                    card_b_idx = self.card_to_idx[card_b]
-                    edge_same_merchants.append((card_a_idx, card_b_idx))
-                    edge_same_merchants.append((card_b_idx, card_a_idx))
-        edge_same_merchants = torch.tensor(edge_same_merchants, dtype=torch.long).t()
-        data['card', 'same_merchant', 'card'].edge_index = edge_same_merchants
+        # merchant_grouped_transactions = transactions.groupby('Dest')['Src'].apply(set)
+        # edge_same_merchants = []
+        # for merchant, cards_group in merchant_grouped_transactions.items():
+        #     if len(cards_group) < 2:
+        #         continue
+        #     cards_list = list(cards_group)
+        #     for i in range(len(cards_list)):
+        #         for j in range(i + 1, len(cards_list)):
+        #             card_a = cards_list[i]
+        #             card_b = cards_list[j]
+        #             card_a_idx = self.card_to_idx[card_a]
+        #             card_b_idx = self.card_to_idx[card_b]
+        #             edge_same_merchants.append((card_a_idx, card_b_idx))
+        #             edge_same_merchants.append((card_b_idx, card_a_idx))
+        # edge_same_merchants = torch.tensor(edge_same_merchants, dtype=torch.long).t()
+        # data['card', 'same_merchant', 'card'].edge_index = edge_same_merchants
 
         # data['card', 'belong_to', 'user'], data['user', 'own', 'card']
         belong_to = self.node_cards.groupby('User')['User_Card'].apply(list)

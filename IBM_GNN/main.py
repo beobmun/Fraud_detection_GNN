@@ -13,8 +13,10 @@ METADATA = (
     ['card', 'merchant', 'user'],
     [
         ('card', 'transaction', 'merchant'),
+        ('merchant', 'transaction_by', 'card'),
         ('merchant', 'refund', 'card'),
-        ('card', 'same_merchant', 'card'),
+        ('card', 'refund_by', 'merchant'),
+        # ('card', 'same_merchant', 'card'),
         ('card', 'belong_to', 'user'),
         ('user', 'own', 'card'),
     ]
@@ -28,8 +30,10 @@ NODE_FEATURES_DIM = {
 
 EDGE_FEATURES_DIM = {
     ('card', 'transaction', 'merchant'): 1 + 3 + 7, # Scaled_Amount (1), Use Chip (3), Error (7) // data['card', 'transaction', 'merchant'].edge_attr.shape[1]
+    ('merchant', 'transaction_by', 'card'): 1 + 3 + 7,
     ('merchant', 'refund', 'card'): 1 + 3 + 7,
-    ('card', 'same_merchant', 'card'): 0, # same_merchant 엣지에는 현재 특성 없음
+    ('card', 'refund_by', 'merchant'): 1 + 3 + 7,
+    # ('card', 'same_merchant', 'card'): 0, # same_merchant 엣지에는 현재 특성 없음
     ('card', 'belong_to', 'user'): 0, # belong_to 엣지에는 현재 특성 없음
     ('user', 'own', 'card'): 0 # own 엣지에는 현재 특성 없음
 }
@@ -72,7 +76,7 @@ def main():
         learning_rate = 0.001
         batch_size=2
         window_size=1
-        memory_size=10
+        memory_size=5
 
         start_date = '1996-01-01'
         end_date = '2019-12-31'
