@@ -39,7 +39,7 @@ EDGE_FEATURES_DIM = {
 }
 
 ZIP_EMB_DIM = 64
-MCC_EMB_DIM = 64
+MCC_EMB_DIM = 32
 GNN_HIDDEN_DIM = 128
 GRU_HIDDEN_DIM = 128
 ATTENTION_HEADS = 4
@@ -76,7 +76,7 @@ def main():
         learning_rate = 0.001
         batch_size=2
         window_size=1
-        memory_size=5
+        memory_size=7
 
         start_date = '1996-01-01'
         end_date = '2019-12-31'

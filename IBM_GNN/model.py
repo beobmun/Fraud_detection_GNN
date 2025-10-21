@@ -6,7 +6,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.utils import softmax
 
 class IntraMetapathAttention(MessagePassing):
-    def __init__(self, in_channels_src, in_channels_dest, out_channels, edge_dim, heads=4, dropout=0.2):
+    def __init__(self, in_channels_src, in_channels_dest, out_channels, edge_dim, heads, dropout=0.2):
         super().__init__(aggr='add', node_dim=-2)
         self.heads = heads
         self.out_channels = out_channels
@@ -55,7 +55,7 @@ class IntraMetapathAttention(MessagePassing):
         return final_message.view(-1, self.heads * self.out_channels)
     
 class GNNLayer(nn.Module):
-    def __init__(self, in_channels_dict, out_channels, metadata, heads=4):
+    def __init__(self, in_channels_dict, out_channels, metadata, heads):
         super().__init__()
         self.out_channels = out_channels
         self.node_types = metadata[0]
@@ -112,7 +112,7 @@ class GNNLayer(nn.Module):
         return final_h_dict
 
 class TemporalEncoder(nn.Module):
-    def __init__(self, node_features_dim, edge_features_dim, zip_emb_dim, mcc_emb_dim, gnn_hidden_channels, gru_hidden_channels, metadata, num_zip_idx, num_mcc_idx, heads=4):
+    def __init__(self, node_features_dim, edge_features_dim, zip_emb_dim, mcc_emb_dim, gnn_hidden_channels, gru_hidden_channels, metadata, num_zip_idx, num_mcc_idx, heads):
         super().__init__()
         self.node_types = metadata[0]
         self.edge_types = metadata[1]
@@ -209,7 +209,7 @@ class EdgeDecoder(nn.Module):
         return predictions
 
 class FraudDetectionModel(nn.Module):
-    def __init__(self, node_features_dim, edge_features_dim, zip_emb_dim, mcc_emb_dim, gnn_hidden_channels, gru_hidden_channels, metadata, num_zip_idx, num_mcc_idx, heads=4):
+    def __init__(self, node_features_dim, edge_features_dim, zip_emb_dim, mcc_emb_dim, gnn_hidden_channels, gru_hidden_channels, metadata, num_zip_idx, num_mcc_idx, heads):
         super().__init__()
         self.temporal_encoder = TemporalEncoder(node_features_dim, edge_features_dim, zip_emb_dim, mcc_emb_dim, gnn_hidden_channels, gru_hidden_channels, metadata, num_zip_idx, num_mcc_idx, heads)
         self.edge_decoder = EdgeDecoder(gru_hidden_channels)

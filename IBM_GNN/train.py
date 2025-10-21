@@ -198,22 +198,27 @@ class Train():
         metrics = {'train_loss': [], 'train_roc_auc': [], 'train_pr_auc': [],
                    'val_loss': [], 'val_roc_auc': [], 'val_pr_auc': []}
 
-        for epoch in range(epochs):
-            train_loss, train_roc_auc, train_pr_auc = self.train_batch(self.train_dataloader, optimizer, criterion, epoch, batch_size)
-            val_loss, val_roc_auc, val_pr_auc = self.evaluate(self.val_dataloader, criterion, epoch, batch_size)
+        try:
+            for epoch in range(epochs):
+                train_loss, train_roc_auc, train_pr_auc = self.train_batch(self.train_dataloader, optimizer, criterion, epoch, batch_size)
+                val_loss, val_roc_auc, val_pr_auc = self.evaluate(self.val_dataloader, criterion, epoch, batch_size)
 
-            metrics['train_loss'].append(train_loss)
-            metrics['train_roc_auc'].append(train_roc_auc)
-            metrics['train_pr_auc'].append(train_pr_auc)
-            metrics['val_loss'].append(val_loss)
-            metrics['val_roc_auc'].append(val_roc_auc)
-            metrics['val_pr_auc'].append(val_pr_auc)
+                metrics['train_loss'].append(train_loss)
+                metrics['train_roc_auc'].append(train_roc_auc)
+                metrics['train_pr_auc'].append(train_pr_auc)
+                metrics['val_loss'].append(val_loss)
+                metrics['val_roc_auc'].append(val_roc_auc)
+                metrics['val_pr_auc'].append(val_pr_auc)
 
-            print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f}, Train ROC AUC: {train_roc_auc:.4f}, Train PR AUC: {train_pr_auc:.4f} | Val Loss: {val_loss:.4f}, Val ROC AUC: {val_roc_auc:.4f}, Val PR AUC: {val_pr_auc:.4f}")
+                print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f}, Train ROC AUC: {train_roc_auc:.4f}, Train PR AUC: {train_pr_auc:.4f} | Val Loss: {val_loss:.4f}, Val ROC AUC: {val_roc_auc:.4f}, Val PR AUC: {val_pr_auc:.4f}")
+                
+                if (epoch+1) % 10 == 0:
+                    self.save_results(metrics, 'training_results', epoch=str(epoch+1))
+
+        except KeyboardInterrupt:
+            self.save_results(metrics, 'training_results', epoch=f'interrupted_{epoch}')
+            print("\nKeyboardInterrupt 발생: 학습 중단 및 결과 저장")
             
-            if (epoch+1) % 10 == 0:
-                self.save_results(metrics, 'training_results', epoch=str(epoch+1))
-            
-        self.save_results(metrics, 'training_results', epoch='final')
-
-        print("Training completed.")
+        else:
+            self.save_results(metrics, 'training_results', epoch='final')
+            print("Training completed.")
