@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, average_precision_score
 from torch_geometric.data import HeteroData
@@ -13,6 +13,9 @@ from tqdm import tqdm
 
 from model import FocalLoss
 from dataloader import Dataset, collate_fn
+
+#pip install 'git+https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup'
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
 class Train():
     def __init__(self):
@@ -180,7 +183,7 @@ class Train():
         if train_dataloader is None or val_dataloader is None:
             raise ValueError("Dataloaders must be provided")
 
-        optimizer = Adam(self.model.parameters(), lr=learning_rate)
+        optimizer = AdamW(self.model.parameters(), lr=learning_rate)
         criterion = FocalLoss()
 
         for epoch in range(epochs):
@@ -193,8 +196,10 @@ class Train():
         if self.train_dataloader is None or self.val_dataloader is None:
             raise ValueError("Dataloaders must be set using set_dataloaders method")
 
-        optimizer = Adam(self.model.parameters(), lr=learning_rate)
+        optimizer = AdamW(self.model.parameters(), lr=learning_rate)
+        scheduler = CosineAnnealingWarmupRestarts(optimizer, first_cycle_steps=100, cycle_mult=1.0, max_lr=learning_rate, min_lr=learning_rate*0.01, warmup_steps=25, gamma=0.5)
         criterion = FocalLoss()
+
         metrics = {'train_loss': [], 'train_roc_auc': [], 'train_pr_auc': [],
                    'val_loss': [], 'val_roc_auc': [], 'val_pr_auc': []}
 
@@ -202,7 +207,8 @@ class Train():
             for epoch in range(epochs):
                 train_loss, train_roc_auc, train_pr_auc = self.train_batch(self.train_dataloader, optimizer, criterion, epoch, batch_size)
                 val_loss, val_roc_auc, val_pr_auc = self.evaluate(self.val_dataloader, criterion, epoch, batch_size)
-
+                scheduler.step()
+                
                 metrics['train_loss'].append(train_loss)
                 metrics['train_roc_auc'].append(train_roc_auc)
                 metrics['train_pr_auc'].append(train_pr_auc)

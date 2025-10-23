@@ -186,25 +186,77 @@ class TemporalEncoder(nn.Module):
         return final_embs_dict
     
 class EdgeDecoder(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, edge_attr_dim, zip_emb_dim, mcc_emb_dim, num_zip_idx, num_mcc_idx):
         super().__init__()
         self.in_channels = in_channels
 
+        combined_attr_dim = edge_attr_dim + zip_emb_dim + mcc_emb_dim
+        combined_dim = in_channels * 2 + combined_attr_dim
+
+        self.target_edge_types = [
+            ('card', 'transaction', 'merchant'),
+            ('merchant', 'refund', 'card')
+        ]
+
+        self.edge_zip_embedding = nn.Embedding(num_zip_idx, zip_emb_dim)
+        self.edge_mcc_embedding = nn.Embedding(num_mcc_idx, mcc_emb_dim)
+
         self.mlp = nn.Sequential(
-            Linear(2 * in_channels, in_channels),
+            Linear(combined_dim, in_channels),
             nn.ReLU(),
             Linear(in_channels, 1),
             nn.Sigmoid()
         )
 
-    def forward(self, node_embs_dict, edge_index_dict):
+    def forward(self, node_embs_dict, target_batch):
+        edge_index_dict = target_batch.edge_index_dict
+        edge_attr_dict = target_batch.edge_attr_dict
+        edge_zip_idx_dict = target_batch.edge_zip_idx_dict
+        edge_mcc_idx_dict = target_batch.edge_mcc_idx_dict
+
         predictions = dict()
-        for edge_type, edge_index in edge_index_dict.items():
+        for edge_type in self.target_edge_types:
+            if edge_type not in edge_index_dict:
+                predictions[edge_type] = torch.empty((0, 1), device=node_embs_dict[list(node_embs_dict.keys())[0]].device)
+                continue
+            edge_index = edge_index_dict[edge_type]
+            if edge_index.numel() == 0:
+                predictions[edge_type] = torch.empty((0, 1), device=node_embs_dict[list(node_embs_dict.keys())[0]].device)
+                continue
+
             src_type, _, dest_type = edge_type
             src_embs = node_embs_dict[src_type][edge_index[0]]
             dest_embs = node_embs_dict[dest_type][edge_index[1]]
-            combined_embs = torch.cat([src_embs, dest_embs], dim=-1)
+
+                    # edge_mcc_embs = self.edge_mcc_embedding(snapshot[edge_type].edge_mcc_idx)
+                    # edge_zip_embs = self.edge_zip_embedding(snapshot[edge_type].edge_zip_idx)
+                    # combined_edge_features = torch.cat([snapshot[edge_type].edge_attr, edge_mcc_embs, edge_zip_embs], dim=-1)
+
+            combined_edge_attr = []
+            if edge_type in edge_attr_dict and edge_attr_dict[edge_type].numel() > 0:
+                combined_edge_attr.append(edge_attr_dict[edge_type])
+            if edge_type in edge_mcc_idx_dict and edge_mcc_idx_dict[edge_type].numel() > 0:
+                edge_mcc_embs = self.edge_mcc_embedding(edge_mcc_idx_dict[edge_type])
+                combined_edge_attr.append(edge_mcc_embs)
+            if edge_type in edge_zip_idx_dict and edge_zip_idx_dict[edge_type].numel() > 0:
+                edge_zip_embs = self.edge_zip_embedding(edge_zip_idx_dict[edge_type])
+                combined_edge_attr.append(edge_zip_embs)
+            
+            if combined_edge_attr:
+                combined_edge_attr = torch.cat(combined_edge_attr, dim=-1)
+                combined_embs = torch.cat([src_embs, dest_embs, combined_edge_attr], dim=-1)
+            else:
+                combined_edge_attr = torch.empty((edge_index.size(1), 0), device=edge_index.device)
+                combined_embs = torch.cat([src_embs, dest_embs], dim=-1)
+
             predictions[edge_type] = self.mlp(combined_embs)
+            
+        # for edge_type, edge_index in edge_index_dict.items():
+        #     src_type, _, dest_type = edge_type
+        #     src_embs = node_embs_dict[src_type][edge_index[0]]
+        #     dest_embs = node_embs_dict[dest_type][edge_index[1]]
+        #     combined_embs = torch.cat([src_embs, dest_embs], dim=-1)
+        #     predictions[edge_type] = self.mlp(combined_embs)
 
         return predictions
 
@@ -212,8 +264,11 @@ class FraudDetectionModel(nn.Module):
     def __init__(self, node_features_dim, edge_features_dim, zip_emb_dim, mcc_emb_dim, gnn_hidden_channels, gru_hidden_channels, metadata, num_zip_idx, num_mcc_idx, heads):
         super().__init__()
         self.temporal_encoder = TemporalEncoder(node_features_dim, edge_features_dim, zip_emb_dim, mcc_emb_dim, gnn_hidden_channels, gru_hidden_channels, metadata, num_zip_idx, num_mcc_idx, heads)
-        self.edge_decoder = EdgeDecoder(gru_hidden_channels)
+        edge_attr_dim = edge_features_dim.get(('card', 'transaction', 'merchant'), 0)
+
+        self.edge_decoder = EdgeDecoder(gru_hidden_channels, edge_attr_dim, zip_emb_dim, mcc_emb_dim, num_zip_idx, num_mcc_idx)
         self.node_types = metadata[0]
+        
 
     def forward(self, history_snapshot_batch, target_batch):
         batch_final_node_embs_dict_list = list()
@@ -233,7 +288,7 @@ class FraudDetectionModel(nn.Module):
                 else:
                     final_node_embs_across_batches[node_type] = torch.empty((0, self.edge_decoder.in_channels), device=device)
 
-        predictions = self.edge_decoder(final_node_embs_across_batches, target_batch.edge_index_dict)
+        predictions = self.edge_decoder(final_node_embs_across_batches, target_batch)
         return predictions
     
 class FocalLoss(nn.Module):

@@ -72,11 +72,11 @@ def main():
             ATTENTION_HEADS)
         model.to(device)
 
-        epochs = 100
-        learning_rate = 0.001
+        epochs = 500
+        learning_rate = 1e-5
         batch_size=2
         window_size=1
-        memory_size=7
+        memory_size=10
 
         start_date = '1996-01-01'
         end_date = '2019-12-31'
